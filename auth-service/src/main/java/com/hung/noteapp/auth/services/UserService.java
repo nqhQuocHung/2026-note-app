@@ -1,8 +1,9 @@
 package com.hung.noteapp.auth.services;
 
 import com.hung.noteapp.auth.dtos.UserRegisterDTO;
-import com.hung.noteapp.auth.pojos.User;
+import com.hung.noteapp.auth.dtos.UserResponseDTO;
 
 public interface UserService {
-    User register(UserRegisterDTO dto);
+    UserResponseDTO updateUser(Long id, UserRegisterDTO dto);
+    UserResponseDTO getUserById(Long id);
 }

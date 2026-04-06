@@ -7,5 +7,5 @@ import java.io.IOException;
 public interface CloudinaryService {
 
     String uploadImage(MultipartFile file, String folder);
-
+    void validateAvatarFile(MultipartFile file);
 }

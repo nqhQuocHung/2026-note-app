@@ -33,4 +33,17 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             throw new RuntimeException("Upload avatar failed", e);
         }
     }
+
+    @Override
+    public void validateAvatarFile(MultipartFile file) {
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IllegalArgumentException("avatar must be an image file");
+        }
+
+        long maxSize = 5 * 1024 * 1024;
+        if (file.getSize() > maxSize) {
+            throw new IllegalArgumentException("avatar size must be less than 5MB");
+        }
+    }
 }

@@ -1,5 +1,7 @@
 package com.hung.noteapp.auth.controllers;
 
+import com.hung.noteapp.auth.dtos.AuthenticateDTO;
+import com.hung.noteapp.auth.dtos.UserDetailDTO;
 import com.hung.noteapp.auth.dtos.UserRegisterDTO;
 import com.hung.noteapp.auth.dtos.UserResponseDTO;
 import com.hung.noteapp.auth.pojos.User;
@@ -14,7 +16,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.Map;
 
 @RestController
-@RequestMapping("v1/noteapp/auth")
+@RequestMapping("/api/v1/auth")
 @RequiredArgsConstructor
 public class AuthController {
     @Autowired
@@ -24,21 +26,19 @@ public class AuthController {
             value = "/register",
             consumes = MediaType.MULTIPART_FORM_DATA_VALUE
     )
-    public ResponseEntity<?> register(
+    public ResponseEntity<UserResponseDTO> register(
             @ModelAttribute UserRegisterDTO dto
     ) {
+        UserResponseDTO response = authService.register(dto);
 
-        User user = authService.register(dto);
-
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(UserResponseDTO.builder()
-                        .id(user.getId())
-                        .username(user.getUsername())
-                        .email(user.getEmail())
-                        .firstName(user.getFirstName())
-                        .lastName(user.getLastName())
-                        .phone(user.getPhone())
-                        .avatarUrl(user.getAvatar())
-                        .build());
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
     }
+
+    @PostMapping("/login")
+    public ResponseEntity<UserDetailDTO> login(@RequestBody AuthenticateDTO request) {
+        UserDetailDTO response = authService.login(request);
+        return ResponseEntity.ok(response);
+    }
+
+
 }
