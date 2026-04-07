@@ -1,5 +1,8 @@
 package com.hung.noteapp.auth.enums;
 
+import lombok.Getter;
+
+@Getter
 public enum GenderEnum {
     UNKNOWN(0),
     MALE(1),
@@ -9,10 +12,6 @@ public enum GenderEnum {
 
     GenderEnum(int value) {
         this.value = value;
-    }
-
-    public int getValue() {
-        return value;
     }
 
     public static GenderEnum fromValue(int value) {

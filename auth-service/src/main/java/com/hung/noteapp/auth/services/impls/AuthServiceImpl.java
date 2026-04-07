@@ -1,21 +1,17 @@
 package com.hung.noteapp.auth.services.impls;
 
 import com.hung.noteapp.auth.configurations.MailTemplateProperties;
-import com.hung.noteapp.auth.dtos.AuthenticateDTO;
-import com.hung.noteapp.auth.dtos.UserDetailDTO;
-import com.hung.noteapp.auth.dtos.UserRegisterDTO;
-import com.hung.noteapp.auth.dtos.UserResponseDTO;
+import com.hung.noteapp.auth.dtos.*;
 import com.hung.noteapp.auth.enums.GenderEnum;
+import com.hung.noteapp.auth.enums.OtpPurpose;
 import com.hung.noteapp.auth.pojos.Role;
 import com.hung.noteapp.auth.pojos.User;
+import com.hung.noteapp.auth.pojos.UserOtp;
 import com.hung.noteapp.auth.repositories.RoleRepository;
+import com.hung.noteapp.auth.repositories.UserOtpRepository;
 import com.hung.noteapp.auth.repositories.UserRepository;
-import com.hung.noteapp.auth.services.AuthService;
-import com.hung.noteapp.auth.services.CloudinaryService;
-import com.hung.noteapp.auth.services.EmailService;
-import com.hung.noteapp.auth.services.JwtService;
+import com.hung.noteapp.auth.services.*;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -29,26 +25,15 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class AuthServiceImpl implements AuthService {
 
-    @Autowired
-    private UserRepository userRepository;
-
-    @Autowired
-    private EmailService emailService;
-
-    @Autowired
-    private RoleRepository roleRepository;
-
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    @Autowired
-    private CloudinaryService cloudinaryService;
-
-    @Autowired
-    private  JwtService jwtService;
-
-    @Autowired
-    private MailTemplateProperties mailTemplateProperties;
+    private final UserRepository userRepository;
+    private final EmailService emailService;
+    private final RoleRepository roleRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final CloudinaryService cloudinaryService;
+    private final JwtService jwtService;
+    private final MailTemplateProperties mailTemplateProperties;
+    private final MessageService messageService;
+    private final UserOtpRepository userOtpRepository;
 
     @Value("${app.avatar.default-url}")
     private String defaultAvatarUrl;
@@ -66,24 +51,29 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public UserResponseDTO register(UserRegisterDTO dto) {
         if (dto.getUsername() == null || dto.getUsername().isBlank()) {
-            throw new IllegalArgumentException("username is required");
+            throw new IllegalArgumentException(messageService.get("auth.username_required"));
         }
+
         if (dto.getPassword() == null || dto.getPassword().isBlank()) {
-            throw new IllegalArgumentException("password is required");
+            throw new IllegalArgumentException(messageService.get("auth.password_required"));
         }
+
         if (dto.getEmail() == null || dto.getEmail().isBlank()) {
-            throw new IllegalArgumentException("email is required");
+            throw new IllegalArgumentException(messageService.get("auth.email_required"));
         }
 
         if (userRepository.existsByUsername(dto.getUsername())) {
-            throw new IllegalArgumentException("username already exists");
+            throw new IllegalArgumentException(messageService.get("user.username_exists"));
         }
+
         if (userRepository.existsByEmail(dto.getEmail())) {
-            throw new IllegalArgumentException("email already exists");
+            throw new IllegalArgumentException(messageService.get("user.email_exists"));
         }
 
         Role roleUser = roleRepository.findByName(defaultRole)
-                .orElseThrow(() -> new IllegalStateException("Role " + defaultRole + " not found"));
+                .orElseThrow(() -> new IllegalStateException(
+                        messageService.get("role.not_found_by_name", defaultRole)
+                ));
 
         String avatarUrl = defaultAvatarUrl;
         MultipartFile avatar = dto.getAvatar();
@@ -125,7 +115,7 @@ public class AuthServiceImpl implements AuthService {
             );
 
         } catch (Exception e) {
-            System.err.println("Send mail failed: " + e.getMessage());
+            System.err.println(messageService.get("email.send_failed") + ": " + e.getMessage());
         }
 
         return UserResponseDTO.builder()
@@ -134,7 +124,9 @@ public class AuthServiceImpl implements AuthService {
                 .email(savedUser.getEmail())
                 .firstName(savedUser.getFirstName())
                 .lastName(savedUser.getLastName())
-                .gender(GenderEnum.fromValue(savedUser.getGender()).name().toLowerCase())
+                .gender(savedUser.getGender() != null
+                        ? GenderEnum.fromValue(savedUser.getGender()).name().toLowerCase()
+                        : null)
                 .phone(savedUser.getPhone())
                 .avatarUrl(savedUser.getAvatar())
                 .roleId(savedUser.getRoles() != null && !savedUser.getRoles().isEmpty()
@@ -147,18 +139,20 @@ public class AuthServiceImpl implements AuthService {
     @Transactional
     public UserDetailDTO login(AuthenticateDTO request) {
         if (request.getUsername() == null || request.getUsername().isBlank()) {
-            throw new IllegalArgumentException("username is required");
+            throw new IllegalArgumentException(messageService.get("auth.username_required"));
         }
 
         if (request.getPassword() == null || request.getPassword().isBlank()) {
-            throw new IllegalArgumentException("password is required");
+            throw new IllegalArgumentException(messageService.get("auth.password_required"));
         }
 
         User user = userRepository.findByUsername(request.getUsername())
-                .orElseThrow(() -> new IllegalArgumentException("Invalid username or password"));
+                .orElseThrow(() -> new IllegalArgumentException(
+                        messageService.get("auth.invalid_credentials")
+                ));
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            throw new IllegalArgumentException("Invalid username or password");
+            throw new IllegalArgumentException(messageService.get("auth.invalid_credentials"));
         }
 
         user.setLastLoginAt(LocalDateTime.now());
@@ -176,7 +170,9 @@ public class AuthServiceImpl implements AuthService {
                 .lastName(savedUser.getLastName())
                 .phone(savedUser.getPhone())
                 .avatarUrl(savedUser.getAvatar())
-                .gender(GenderEnum.fromValue(savedUser.getGender()).name())
+                .gender(savedUser.getGender() != null
+                        ? GenderEnum.fromValue(savedUser.getGender()).name().toLowerCase()
+                        : null)
                 .roleId(savedUser.getRoles() != null && !savedUser.getRoles().isEmpty()
                         ? savedUser.getRoles().iterator().next().getId()
                         : null)
@@ -184,4 +180,60 @@ public class AuthServiceImpl implements AuthService {
                 .build();
     }
 
+    @Override
+    @Transactional
+    public String changePasswordWithOtp(ChangePasswordDTO request) {
+        if (request.getUserId() == null) {
+            throw new IllegalArgumentException(messageService.get("auth.user_id_required"));
+        }
+
+        if (request.getOtp() == null || request.getOtp().isBlank()) {
+            throw new IllegalArgumentException(messageService.get("auth.otp_required"));
+        }
+
+        if (request.getNewPassword() == null || request.getNewPassword().isBlank()) {
+            throw new IllegalArgumentException(messageService.get("auth.new_password_required"));
+        }
+
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.user_not_found")));
+
+        UserOtp userOtp = userOtpRepository
+                .findByUserIdAndPurpose(user.getId(), OtpPurpose.CHANGE_PASSWORD)
+                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.otp_not_found")));
+
+        try {
+            if (Boolean.TRUE.equals(userOtp.getUsed())) {
+                throw new IllegalArgumentException(messageService.get("auth.otp_used"));
+            }
+
+            if (userOtp.getExpiresAt() == null || userOtp.getExpiresAt().isBefore(LocalDateTime.now())) {
+                throw new IllegalArgumentException(messageService.get("auth.otp_expired"));
+            }
+
+            if (!request.getOtp().equals(userOtp.getOtpCode())) {
+                throw new IllegalArgumentException(messageService.get("auth.otp_invalid"));
+            }
+
+            if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+                throw new IllegalArgumentException(messageService.get("auth.new_password_same_as_old"));
+            }
+
+            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+            userRepository.save(user);
+
+            userOtp.setUsed(true);
+            userOtp.setFailedAttempts(0);
+            userOtp.setResendCount(0);
+            userOtpRepository.save(userOtp);
+
+            return messageService.get("auth.change_password_success");
+
+        } catch (IllegalArgumentException ex) {
+            Integer currentFailedAttempts = userOtp.getFailedAttempts() == null ? 0 : userOtp.getFailedAttempts();
+            userOtp.setFailedAttempts(currentFailedAttempts + 1);
+            userOtpRepository.save(userOtp);
+            throw ex;
+        }
+    }
 }

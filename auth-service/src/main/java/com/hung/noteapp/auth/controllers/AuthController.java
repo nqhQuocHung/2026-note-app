@@ -1,10 +1,6 @@
 package com.hung.noteapp.auth.controllers;
 
-import com.hung.noteapp.auth.dtos.AuthenticateDTO;
-import com.hung.noteapp.auth.dtos.UserDetailDTO;
-import com.hung.noteapp.auth.dtos.UserRegisterDTO;
-import com.hung.noteapp.auth.dtos.UserResponseDTO;
-import com.hung.noteapp.auth.pojos.User;
+import com.hung.noteapp.auth.dtos.*;
 import com.hung.noteapp.auth.services.AuthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,5 +36,14 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
-
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePasswordWithOtp(@RequestBody ChangePasswordDTO request) {
+        try {
+            String message = authService.changePasswordWithOtp(request);
+            return ResponseEntity.ok(Map.of("message", message));
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("message", ex.getMessage()));
+        }
+    }
 }
