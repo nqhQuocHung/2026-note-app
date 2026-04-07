@@ -1,12 +1,15 @@
 package com.hung.noteapp.auth.controllers;
 
-import com.hung.noteapp.auth.dtos.UserRegisterDTO;
 import com.hung.noteapp.auth.dtos.UserResponseDTO;
+import com.hung.noteapp.auth.dtos.UserUpdateDTO;
 import com.hung.noteapp.auth.services.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/user")
@@ -16,8 +19,14 @@ public class UserController {
     private UserService userService;
 
     @GetMapping("/{id}")
-    public ResponseEntity<UserResponseDTO> getUserById(@PathVariable Long id) {
-        return ResponseEntity.ok(userService.getUserById(id));
+    public ResponseEntity<?> getUserById(@PathVariable Long id) {
+        try {
+            UserResponseDTO user = userService.getUserById(id);
+            return ResponseEntity.ok(user);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", ex.getMessage()));
+        }
     }
 
     @PutMapping(
@@ -26,9 +35,23 @@ public class UserController {
     )
     public ResponseEntity<UserResponseDTO> updateUser(
             @PathVariable Long id,
-            @ModelAttribute UserRegisterDTO dto
+            @ModelAttribute UserUpdateDTO dto
     ) {
         UserResponseDTO response = userService.updateUser(id, dto);
         return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping(value = "/{id}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<?> patchUser(
+            @PathVariable Long id,
+            @ModelAttribute UserUpdateDTO dto
+    ) {
+        try {
+            UserResponseDTO response = userService.update(id, dto);
+            return ResponseEntity.ok(response);
+        } catch (IllegalArgumentException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("message", ex.getMessage()));
+        }
     }
 }

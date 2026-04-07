@@ -1,10 +1,10 @@
 package com.hung.noteapp.auth.services.impls;
 
 import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
-
 import com.hung.noteapp.auth.services.CloudinaryService;
-import org.springframework.beans.factory.annotation.Autowired;
+import com.hung.noteapp.auth.services.MessageService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -12,12 +12,15 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-
 @Service
+@RequiredArgsConstructor
 public class CloudinaryServiceImpl implements CloudinaryService {
 
-    @Autowired
-    private Cloudinary cloudinary;
+    private final Cloudinary cloudinary;
+    private final MessageService messageService;
+
+    @Value("${app.avatar.max-size-bytes:5242880}")
+    private long maxAvatarSizeBytes;
 
     @Override
     public String uploadImage(MultipartFile file, String folder) {
@@ -30,20 +33,27 @@ public class CloudinaryServiceImpl implements CloudinaryService {
             return (String) result.get("secure_url");
 
         } catch (IOException e) {
-            throw new RuntimeException("Upload avatar failed", e);
+            throw new RuntimeException(messageService.get("cloudinary.upload_failed"), e);
         }
     }
 
     @Override
     public void validateAvatarFile(MultipartFile file) {
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new IllegalArgumentException("avatar must be an image file");
+        if (file == null) {
+            throw new IllegalArgumentException(messageService.get("avatar.required"));
         }
 
-        long maxSize = 5 * 1024 * 1024;
-        if (file.getSize() > maxSize) {
-            throw new IllegalArgumentException("avatar size must be less than 5MB");
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException(messageService.get("validation.file_empty"));
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !contentType.startsWith("image/")) {
+            throw new IllegalArgumentException(messageService.get("avatar.invalid_type"));
+        }
+
+        if (file.getSize() > maxAvatarSizeBytes) {
+            throw new IllegalArgumentException(messageService.get("avatar.invalid_size"));
         }
     }
 }

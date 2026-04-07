@@ -1,4 +1,4 @@
-package com.hung.noteapp.auth.services.impl;
+package com.hung.noteapp.auth.services.impls;
 
 import com.hung.noteapp.auth.services.JwtService;
 import io.jsonwebtoken.Claims;
