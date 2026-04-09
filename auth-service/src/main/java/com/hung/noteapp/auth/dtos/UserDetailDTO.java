@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 @Builder
 public class UserDetailDTO {
     private String accessToken;
+    private String refreshToken;
     private String tokenType;
     private Long id;
     private String username;
