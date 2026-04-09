@@ -1,5 +1,6 @@
 package com.hung.noteapp.auth.pojos;
 
+import com.hung.noteapp.auth.enums.TokenTypeEnum;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -26,6 +27,10 @@ public class RefreshToken extends BaseEntity {
 
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "token_type", nullable = false, length = 20)
+    private TokenTypeEnum tokenType;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)

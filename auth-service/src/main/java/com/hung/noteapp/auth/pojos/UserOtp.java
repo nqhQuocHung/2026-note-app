@@ -1,6 +1,6 @@
 package com.hung.noteapp.auth.pojos;
 
-import com.hung.noteapp.auth.enums.OtpPurpose;
+import com.hung.noteapp.auth.enums.OtpPurposeEnum;
 import jakarta.persistence.*;
 import lombok.*;
 
@@ -27,9 +27,9 @@ public class UserOtp extends BaseEntity {
     @Column(name = "user_id", nullable = false)
     private Long userId;
 
-    @Enumerated(EnumType.ORDINAL)
-    @Column(name = "purpose", nullable = false)
-    private OtpPurpose purpose;
+    @Enumerated(EnumType.STRING)
+    @Column(name = "purpose", nullable = false, length = 50)
+    private OtpPurposeEnum purpose;
 
     @Column(name = "otp_code", nullable = false, length = 255)
     private String otpCode;

@@ -2,11 +2,16 @@ package com.hung.noteapp.auth.services.impls;
 
 import com.hung.noteapp.auth.configurations.MailTemplateProperties;
 import com.hung.noteapp.auth.dtos.*;
+import com.hung.noteapp.auth.dtos.requests.RefreshTokenRequest;
+import com.hung.noteapp.auth.dtos.responses.TokenResponseDTO;
 import com.hung.noteapp.auth.enums.GenderEnum;
-import com.hung.noteapp.auth.enums.OtpPurpose;
+import com.hung.noteapp.auth.enums.OtpPurposeEnum;
+import com.hung.noteapp.auth.enums.TokenTypeEnum;
+import com.hung.noteapp.auth.pojos.RefreshToken;
 import com.hung.noteapp.auth.pojos.Role;
 import com.hung.noteapp.auth.pojos.User;
 import com.hung.noteapp.auth.pojos.UserOtp;
+import com.hung.noteapp.auth.repositories.RefreshTokenRepository;
 import com.hung.noteapp.auth.repositories.RoleRepository;
 import com.hung.noteapp.auth.repositories.UserOtpRepository;
 import com.hung.noteapp.auth.repositories.UserRepository;
@@ -17,8 +22,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Set;
 
 @Service
@@ -34,6 +43,11 @@ public class AuthServiceImpl implements AuthService {
     private final MailTemplateProperties mailTemplateProperties;
     private final MessageService messageService;
     private final UserOtpRepository userOtpRepository;
+    private final UserOtpFailureService userOtpFailureService;
+    private final RefreshTokenRepository refreshTokenRepository;
+
+    @Value("${MAX.OTP.FAILED.ATTEMPTS}")
+    private int MAX_OTP_FAILED_ATTEMPTS;
 
     @Value("${app.avatar.default-url}")
     private String defaultAvatarUrl;
@@ -155,13 +169,36 @@ public class AuthServiceImpl implements AuthService {
             throw new IllegalArgumentException(messageService.get("auth.invalid_credentials"));
         }
 
-        user.setLastLoginAt(LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+
+        user.setLastLoginAt(now);
         User savedUser = userRepository.save(user);
 
         String accessToken = jwtService.generateToken(savedUser.getUsername());
+        String refreshToken = jwtService.generateRefreshToken(savedUser.getUsername());
+
+        RefreshToken accessTokenEntity = RefreshToken.builder()
+                .tokenHash(hashToken(accessToken))
+                .expiresAt(now.plusMinutes(15))
+                .revokedAt(null)
+                .tokenType(TokenTypeEnum.ACCESS)
+                .user(savedUser)
+                .build();
+
+        RefreshToken refreshTokenEntity = RefreshToken.builder()
+                .tokenHash(hashToken(refreshToken))
+                .expiresAt(now.plusDays(7))
+                .revokedAt(null)
+                .tokenType(TokenTypeEnum.REFRESH)
+                .user(savedUser)
+                .build();
+
+        refreshTokenRepository.save(accessTokenEntity);
+        refreshTokenRepository.save(refreshTokenEntity);
 
         return UserDetailDTO.builder()
                 .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tokenType(jwtType)
                 .id(savedUser.getId())
                 .username(savedUser.getUsername())
@@ -182,7 +219,141 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     @Transactional
+    public TokenResponseDTO refreshToken(RefreshTokenRequest request) {
+        if (request.getRefreshToken() == null || request.getRefreshToken().isBlank()) {
+            throw new IllegalArgumentException(messageService.get("auth.refresh_token_required"));
+        }
+
+        String rawRefreshToken = request.getRefreshToken();
+        String username;
+
+        try {
+            username = jwtService.extractUsername(rawRefreshToken);
+        } catch (Exception e) {
+            throw new IllegalArgumentException(messageService.get("auth.invalid_refresh_token"));
+        }
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        messageService.get("auth.user_not_found")
+                ));
+
+        if (!jwtService.isTokenValid(rawRefreshToken, user.getUsername())) {
+            throw new IllegalArgumentException(messageService.get("auth.invalid_refresh_token"));
+        }
+
+        String refreshTokenHash = hashToken(rawRefreshToken);
+
+        RefreshToken storedRefreshToken = refreshTokenRepository
+                .findByTokenHashAndTokenTypeAndRevokedAtIsNull(
+                        refreshTokenHash,
+                        TokenTypeEnum.REFRESH
+                )
+                .orElseThrow(() -> new IllegalArgumentException(
+                        messageService.get("auth.refresh_token_not_found")
+                ));
+
+        LocalDateTime now = LocalDateTime.now();
+
+        if (storedRefreshToken.getExpiresAt() == null || storedRefreshToken.getExpiresAt().isBefore(now)) {
+            throw new IllegalArgumentException(messageService.get("auth.refresh_token_expired"));
+        }
+
+        storedRefreshToken.setRevokedAt(now);
+        refreshTokenRepository.save(storedRefreshToken);
+
+        List<RefreshToken> activeAccessTokens =
+                refreshTokenRepository.findByUserIdAndTokenTypeAndRevokedAtIsNull(
+                        user.getId(),
+                        TokenTypeEnum.ACCESS
+                );
+
+        for (RefreshToken token : activeAccessTokens) {
+            token.setRevokedAt(now);
+        }
+        refreshTokenRepository.saveAll(activeAccessTokens);
+
+        String newAccessToken = jwtService.generateToken(user.getUsername());
+        String newRefreshToken = jwtService.generateRefreshToken(user.getUsername());
+
+        RefreshToken accessTokenEntity = RefreshToken.builder()
+                .tokenHash(hashToken(newAccessToken))
+                .expiresAt(now.plusMinutes(15))
+                .revokedAt(null)
+                .tokenType(TokenTypeEnum.ACCESS)
+                .user(user)
+                .build();
+
+        RefreshToken refreshTokenEntity = RefreshToken.builder()
+                .tokenHash(hashToken(newRefreshToken))
+                .expiresAt(now.plusDays(7))
+                .revokedAt(null)
+                .tokenType(TokenTypeEnum.REFRESH)
+                .user(user)
+                .build();
+
+        refreshTokenRepository.save(accessTokenEntity);
+        refreshTokenRepository.save(refreshTokenEntity);
+
+        return TokenResponseDTO.builder()
+                .accessToken(newAccessToken)
+                .refreshToken(newRefreshToken)
+                .tokenType(jwtType)
+                .build();
+    }
+
+    @Override
+    @Transactional
     public String changePasswordWithOtp(ChangePasswordDTO request) {
+        return processPasswordWithOtp(request, OtpPurposeEnum.CHANGE_PASSWORD);
+    }
+
+    @Override
+    @Transactional
+    public String forgotPasswordWithOtp(ChangePasswordDTO request) {
+        return processPasswordWithOtp(request, OtpPurposeEnum.FORGOT_PASSWORD);
+    }
+
+    private String processPasswordWithOtp(ChangePasswordDTO request, OtpPurposeEnum purpose) {
+        validateChangePasswordRequest(request);
+
+        User user = userRepository.findById(request.getUserId())
+                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.user_not_found")));
+
+        UserOtp userOtp = userOtpRepository
+                .findByUserIdAndPurpose(user.getId(), purpose)
+                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.otp_not_found")));
+
+        validateOtpState(userOtp);
+
+        if (!request.getOtp().equals(userOtp.getOtpCode())) {
+            userOtpFailureService.increaseFailedAttemptsAndLockIfNeeded(
+                    userOtp.getId(),
+                    MAX_OTP_FAILED_ATTEMPTS
+            );
+            throw new IllegalArgumentException(messageService.get("auth.otp_invalid"));
+        }
+
+        if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
+            throw new IllegalArgumentException(messageService.get("auth.new_password_same_as_old"));
+        }
+
+        user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+        userRepository.save(user);
+
+        userOtp.setUsed(true);
+        userOtp.setFailedAttempts(0);
+        userOtp.setResendCount(0);
+        userOtpRepository.save(userOtp);
+
+        return messageService.get("auth.change_password_success");
+    }
+
+    private void validateChangePasswordRequest(ChangePasswordDTO request) {
+        if (request == null) {
+            throw new IllegalArgumentException(messageService.get("auth.invalid_request"));
+        }
+
         if (request.getUserId() == null) {
             throw new IllegalArgumentException(messageService.get("auth.user_id_required"));
         }
@@ -194,46 +365,37 @@ public class AuthServiceImpl implements AuthService {
         if (request.getNewPassword() == null || request.getNewPassword().isBlank()) {
             throw new IllegalArgumentException(messageService.get("auth.new_password_required"));
         }
+    }
 
-        User user = userRepository.findById(request.getUserId())
-                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.user_not_found")));
+    private void validateOtpState(UserOtp userOtp) {
+        if (Boolean.TRUE.equals(userOtp.getUsed())) {
+            throw new IllegalArgumentException(messageService.get("auth.otp_used"));
+        }
 
-        UserOtp userOtp = userOtpRepository
-                .findByUserIdAndPurpose(user.getId(), OtpPurpose.CHANGE_PASSWORD)
-                .orElseThrow(() -> new IllegalArgumentException(messageService.get("auth.otp_not_found")));
+        if (userOtp.getExpiresAt() == null || userOtp.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new IllegalArgumentException(messageService.get("auth.otp_expired"));
+        }
 
-        try {
-            if (Boolean.TRUE.equals(userOtp.getUsed())) {
-                throw new IllegalArgumentException(messageService.get("auth.otp_used"));
-            }
-
-            if (userOtp.getExpiresAt() == null || userOtp.getExpiresAt().isBefore(LocalDateTime.now())) {
-                throw new IllegalArgumentException(messageService.get("auth.otp_expired"));
-            }
-
-            if (!request.getOtp().equals(userOtp.getOtpCode())) {
-                throw new IllegalArgumentException(messageService.get("auth.otp_invalid"));
-            }
-
-            if (passwordEncoder.matches(request.getNewPassword(), user.getPassword())) {
-                throw new IllegalArgumentException(messageService.get("auth.new_password_same_as_old"));
-            }
-
-            user.setPassword(passwordEncoder.encode(request.getNewPassword()));
-            userRepository.save(user);
-
-            userOtp.setUsed(true);
-            userOtp.setFailedAttempts(0);
-            userOtp.setResendCount(0);
-            userOtpRepository.save(userOtp);
-
-            return messageService.get("auth.change_password_success");
-
-        } catch (IllegalArgumentException ex) {
-            Integer currentFailedAttempts = userOtp.getFailedAttempts() == null ? 0 : userOtp.getFailedAttempts();
-            userOtp.setFailedAttempts(currentFailedAttempts + 1);
-            userOtpRepository.save(userOtp);
-            throw ex;
+        int failedAttempts = userOtp.getFailedAttempts() == null ? 0 : userOtp.getFailedAttempts();
+        if (failedAttempts >= MAX_OTP_FAILED_ATTEMPTS) {
+            throw new IllegalArgumentException(messageService.get("auth.otp_locked"));
         }
     }
+
+    private String hashToken(String token) {
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hashBytes = digest.digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hashBytes) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new RuntimeException("Cannot hash token", e);
+        }
+    }
+
+
 }

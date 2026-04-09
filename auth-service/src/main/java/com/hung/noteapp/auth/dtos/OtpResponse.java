@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Data
 @AllArgsConstructor
 public class OtpResponse {
+    private Long userId;
     private String message;
     private String otp;
     private LocalDateTime CreatedAt;

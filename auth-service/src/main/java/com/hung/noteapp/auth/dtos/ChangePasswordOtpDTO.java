@@ -5,7 +5,7 @@ import lombok.Data;
 
 @Data
 @AllArgsConstructor
-public class ChangePasswordOtpRequest {
+public class ChangePasswordOtpDTO {
     private Long userId;
     private String oldPassword;
 }
