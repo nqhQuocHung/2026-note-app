@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 public class OtpResponse {
     private Long userId;
     private String message;
-    private String otp;
+    private String email;
     private LocalDateTime CreatedAt;
     private LocalDateTime ExpiresAt;
 }

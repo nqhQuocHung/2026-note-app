@@ -1,5 +1,6 @@
 package com.hung.noteapp.auth.services.impls;
 
+import com.hung.noteapp.auth.configurations.MailTemplateProperties;
 import com.hung.noteapp.auth.dtos.ChangePasswordOtpDTO;
 import com.hung.noteapp.auth.dtos.ForgotPasswordDTO;
 import com.hung.noteapp.auth.dtos.OtpResponse;
@@ -25,10 +26,17 @@ import java.util.Random;
 public class OtpServiceImpl implements OtpService {
 
     private final UserRepository userRepository;
+    private final MailTemplateProperties mailTemplateProperties;
     private final UserOtpRepository userOtpRepository;
     private final PasswordEncoder passwordEncoder;
     private final EmailService emailService;
     private final MessageService messageService;
+
+    @Value("${mail.template.forgot-password-otp.subject}")
+    private String forgotPasswordOtpSubject;
+
+    @Value("${mail.template.forgot-password-otp.body}")
+    private String forgotPasswordOtpBody;
 
     @Value("${mail.template.change-password-otp.subject}")
     private String changePasswordOtpSubject;
@@ -105,17 +113,20 @@ public class OtpServiceImpl implements OtpService {
     @Transactional
     public OtpResponse createForgotPasswordOtp(ForgotPasswordDTO request) {
         if (request == null || request.getUsername() == null || request.getUsername().isBlank()) {
-            throw new IllegalArgumentException(getMessageSafely("auth.username_required", "Username is required"));
+            throw new IllegalArgumentException(
+                    getMessageSafely("auth.username_required", "Username is required")
+            );
         }
 
-        User user = userRepository.findByUsername(request.getUsername())
+        User user = userRepository.findByUsername(request.getUsername().trim())
                 .orElseThrow(() -> new IllegalArgumentException(
                         getMessageSafely("auth.user_not_found", "User not found")
                 ));
 
         String otp = generateOtp();
         LocalDateTime now = LocalDateTime.now();
-        LocalDateTime expiredAt = now.plusMinutes(5);
+        int expiredMinutes = 5;
+        LocalDateTime expiredAt = now.plusMinutes(expiredMinutes);
 
         UserOtp userOtp = userOtpRepository
                 .findByUserIdAndPurpose(user.getId(), OtpPurposeEnum.FORGOT_PASSWORD)
@@ -141,15 +152,39 @@ public class OtpServiceImpl implements OtpService {
             userOtp.setResendCount(resendCount + 1);
         }
 
-        userOtpRepository.save(userOtp);
+        userOtp = userOtpRepository.save(userOtp);
 
+        try {
+            String subject = forgotPasswordOtpSubject;
+
+            String username = user.getUsername();
+            if (username == null || username.isBlank()) {
+                username = user.getFirstName() != null ? user.getFirstName() : "";
+            }
+
+            String body = forgotPasswordOtpBody
+                    .replace("{{username}}", username)
+                    .replace("{{otp}}", otp)
+                    .replace("{{expiredMinutes}}", String.valueOf(expiredMinutes));
+
+            emailService.sendHtmlEmail(
+                    user.getEmail(),
+                    subject,
+                    body
+            );
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    getMessageSafely("email.send_failed", "Failed to send email") + ": " + e.getMessage(),
+                    e
+            );
+        }
         String message = getMessageSafely("email.send_success", "Email sent successfully")
                 + " to " + user.getEmail();
 
         return new OtpResponse(
                 userOtp.getUserId(),
                 message,
-                userOtp.getOtpCode(),
+                user.getEmail(),
                 userOtp.getCreatedAt(),
                 userOtp.getExpiresAt()
         );
