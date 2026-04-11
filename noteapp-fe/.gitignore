@@ -1,6 +1,11 @@
 # dependencies
 node_modules/
 
+.idea/
+noteapp-fe/package-lock.backup.json
+noteapp-fe/node_modules/
+noteapp-fe/yarn.lock
+
 # build
 dist/
 build/
